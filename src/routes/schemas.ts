@@ -1,18 +1,24 @@
 import { z } from 'zod';
-
-const LONG_NUMBER = /([0-9][ -]?){12,}/;
+import { hasLongNumber } from '../lib/longNumber.js';
 
 export const questionSetSchema = z.object({
   questions: z
     .array(
       z.object({
-        question: z.string().trim().min(3, 'Each question needs a few more words.').max(200),
+        question: z
+          .string()
+          .trim()
+          .min(3, 'Each question needs a few more words.')
+          .max(200)
+          .refine((question) => !hasLongNumber(question), {
+            message: 'Please do not put card or account numbers in a question.',
+          }),
         answer: z
           .string()
           .trim()
           .min(1, 'Every question needs an answer.')
           .max(200)
-          .refine((answer) => !LONG_NUMBER.test(answer), {
+          .refine((answer) => !hasLongNumber(answer), {
             message: 'Please do not use card or account numbers as answers.',
           }),
       }),
