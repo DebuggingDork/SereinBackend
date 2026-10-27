@@ -2,6 +2,7 @@ import { env } from '../config/env.js';
 import { sendMail } from '../lib/email.js';
 import { HttpError, maybe, must } from '../lib/errors.js';
 import { db } from '../lib/supabase.js';
+import { hashQuestions, type QuestionInput } from './gate.js';
 
 export const WAIT_MINUTES = { normal: 90, super: 20 } as const;
 export type RecoveryKind = keyof typeof WAIT_MINUTES;
@@ -80,8 +81,9 @@ export async function createRequest(userId: string, email: string, kind: Recover
       .single(),
   ) as RecoveryRow;
 
-  // Telling the real owner at once is what stops a quiet takeover.
-  await sendMail({
+  // Telling the real owner at once is what stops a quiet takeover. Mail never throws, and
+  // a slow mail server should not hold up the screen, so neither of these is awaited.
+  void sendMail({
     to: email,
     subject: 'A request to reset your Serein questions',
     text: [
@@ -91,7 +93,7 @@ export async function createRequest(userId: string, email: string, kind: Recover
   });
 
   if (env.OWNER_NOTIFY_EMAIL) {
-    await sendMail({
+    void sendMail({
       to: env.OWNER_NOTIFY_EMAIL,
       subject: `Recovery request (${kind})`,
       text: `${email} has requested recovery. It is waiting in the admin panel.`,
@@ -101,17 +103,16 @@ export async function createRequest(userId: string, email: string, kind: Recover
   return publicView(row);
 }
 
-export async function completeRequest(userId: string): Promise<void> {
+// Closes the request and swaps the questions in one step, or does neither.
+export async function completeWithQuestions(userId: string, questions: QuestionInput[]): Promise<void> {
   const latest = await latestFor(userId);
   if (latest?.status !== 'ready') {
     throw new HttpError(403, 'This request is not ready yet.', { code: 'not_ready' });
   }
-  must(
-    await db
-      .from('recovery_requests')
-      .update({ status: 'completed', completed_at: new Date().toISOString() })
-      .eq('id', latest.id),
+  const done = must(
+    await db.rpc('complete_recovery', { p_user_id: userId, p_questions: await hashQuestions(questions) }),
   );
+  if (!done) throw new HttpError(403, 'This request is not ready yet.', { code: 'not_ready' });
 }
 
 async function emailFor(userId: string): Promise<string | undefined> {
@@ -129,16 +130,20 @@ export async function approve(requestId: string) {
   if (row.status !== 'pending') throw new HttpError(409, `This request is already ${row.status}.`);
 
   const waitOver = Date.parse(row.ready_at) <= Date.now();
-  must(
+  // Conditional, so an approval cannot overwrite a denial that landed just before it.
+  const updated = must(
     await db
       .from('recovery_requests')
       .update({ status: waitOver ? 'ready' : 'approved', approved_at: new Date().toISOString() })
-      .eq('id', requestId),
+      .eq('id', requestId)
+      .eq('status', 'pending')
+      .select('id'),
   );
+  if (updated.length === 0) throw new HttpError(409, 'This request has just changed. Reload to see it.');
 
   const email = await emailFor(row.user_id);
   if (email) {
-    await sendMail({
+    void sendMail({
       to: email,
       subject: 'The system has approved your request',
       text: [
@@ -165,6 +170,7 @@ export async function deny(requestId: string) {
     await db
       .from('recovery_requests')
       .update({ status: 'denied', denied_at: new Date().toISOString() })
-      .eq('id', requestId),
+      .eq('id', requestId)
+      .in('status', ['pending', 'approved', 'ready']),
   );
 }
