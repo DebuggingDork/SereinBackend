@@ -241,7 +241,8 @@ describe.skipIf(!anonKey)('data isolation', () => {
     expect(forged.error).not.toBeNull();
 
     // A transaction aimed at someone else's account cannot move their balance.
-    await b.client.from('transactions').insert({ kind: 'expense', amount: 999, account_id: account.data.id });
+    const aimed = await b.client.from('transactions').insert({ kind: 'expense', amount: 999, account_id: account.data.id });
+    expect(aimed.error).not.toBeNull();
     const after = await a.client.from('accounts').select('balance').eq('id', account.data.id).single();
     expect(Number(after.data!.balance)).toBe(1000);
 
