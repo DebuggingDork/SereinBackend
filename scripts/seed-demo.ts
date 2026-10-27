@@ -23,6 +23,9 @@ const day = (offset: number) => {
 const rand = (min: number, max: number) => Math.round(min + Math.random() * (max - min));
 const pick = <T,>(items: T[]): T => items[rand(0, items.length - 1)] as T;
 
+// Rows in one batch can differ; columns they leave out should get their defaults, not null.
+const insert = (table: string, rows: Record<string, unknown>[]) => db.from(table).insert(rows, { defaultToNull: false });
+
 async function must<T>(query: PromiseLike<{ data: T; error: { message: string } | null }>): Promise<T> {
   const { data, error } = await query;
   if (error) throw new Error(error.message);
@@ -75,9 +78,7 @@ await must(
 );
 
 const accounts = await must(
-  db
-    .from('accounts')
-    .insert([
+  insert('accounts', [
       { user_id, name: 'Salary', kind: 'bank', bank_name: 'HDFC', last_four: '4092', balance: 212000 },
       { user_id, name: 'Savings', kind: 'bank', bank_name: 'Axis', last_four: '7781', balance: 186000 },
       { user_id, name: 'Paytm', kind: 'wallet', balance: 2400 },
@@ -125,10 +126,10 @@ for (const offset of [-61, -31, -1]) {
   transactions.push({ user_id, kind: 'income', amount: 82000, category_id: category('Salary'), account_id: account('Salary'), occurred_on: day(offset), payee: 'Acme Corp', checked: true });
   transactions.push({ user_id, kind: 'expense', amount: 18000, category_id: category('Rent'), account_id: account('Salary'), occurred_on: day(offset + 1), payee: 'Landlord', payment_app: 'Netbanking', checked: true });
 }
-await must(db.from('transactions').insert(transactions));
+await must(insert('transactions', transactions));
 
 await must(
-  db.from('budgets').insert([
+  insert('budgets', [
     { user_id, category_id: category('Food'), period: 'monthly', limit_amount: 9000 },
     { user_id, category_id: category('Transport'), period: 'monthly', limit_amount: 3500 },
     { user_id, category_id: category('Shopping'), period: 'monthly', limit_amount: 6000 },
@@ -137,7 +138,7 @@ await must(
 );
 
 await must(
-  db.from('scheduled_items').insert([
+  insert('scheduled_items', [
     { user_id, name: 'Netflix', amount: 649, account_id: account('Axis Ace'), category_id: category('Entertainment'), frequency: 'monthly', next_run: day(6), is_subscription: true },
     { user_id, name: 'Claude', amount: 1700, account_id: account('Axis Ace'), category_id: category('Bills'), frequency: 'monthly', next_run: day(12), is_subscription: true },
     { user_id, name: 'Spotify', amount: 119, account_id: account('Axis Ace'), category_id: category('Entertainment'), frequency: 'monthly', next_run: day(3), is_subscription: true },
@@ -147,26 +148,24 @@ await must(
 );
 
 const [ravi, asha] = await must(
-  db.from('people').insert([{ user_id, name: 'Ravi' }, { user_id, name: 'Asha' }]).select('id'),
+  insert('people', [{ user_id, name: 'Ravi' }, { user_id, name: 'Asha' }]).select('id'),
 );
 const [lent, borrowed] = await must(
-  db
-    .from('debts')
-    .insert([
+  insert('debts', [
       { user_id, person_id: ravi!.id, direction: 'lent', amount: 5000, opened_on: day(-40), due_on: day(4), notes: 'Trip to Hampi' },
       { user_id, person_id: asha!.id, direction: 'borrowed', amount: 2000, opened_on: day(-12), due_on: day(9) },
     ])
     .select('id'),
 );
 await must(
-  db.from('debt_payments').insert([
+  insert('debt_payments', [
     { user_id, debt_id: lent!.id, amount: 3000, paid_on: day(-10) },
     { user_id, debt_id: borrowed!.id, amount: 800, paid_on: day(-3) },
   ]),
 );
 
 await must(
-  db.from('goals').insert([
+  insert('goals', [
     { user_id, name: 'Emergency fund', target: 300000, saved: 186000, deadline: day(240), account_id: account('Savings') },
     { user_id, name: 'New laptop', target: 120000, saved: 42000, deadline: day(150) },
     { user_id, name: 'Japan trip', target: 250000, saved: 30000, deadline: day(420) },
@@ -174,7 +173,7 @@ await must(
 );
 
 await must(
-  db.from('transaction_templates').insert([
+  insert('transaction_templates', [
     { user_id, name: 'Tea', amount: 20, category_id: category('Food'), account_id: account('Cash'), payee: 'Tea' },
     { user_id, name: 'Metro', amount: 45, category_id: category('Metro'), account_id: account('Paytm'), payee: 'Metro', payment_app: 'Paytm' },
     { user_id, name: 'Gym', amount: 150, category_id: category('Health'), account_id: account('Salary'), payee: 'Gym', payment_app: 'GPay' },
@@ -182,7 +181,7 @@ await must(
 );
 
 await must(
-  db.from('net_worth_snapshots').insert(
+  insert('net_worth_snapshots', 
     Array.from({ length: 90 }, (_, index) => {
       const offset = index - 90;
       const growth = 400_000 + (index / 90) * 90_000 + Math.sin(index / 6) * 7_000;
@@ -200,9 +199,9 @@ for (let offset = -35; offset <= -1; offset++) {
     tasks.push({ user_id, title: pick(TASKS), due_on: day(offset), status: 'done', completed_at: iso, category: pick(['Work', 'Home', 'Money', 'Health']), created_at: iso, priority: pick(['low', 'medium', 'high']) });
   }
 }
-await must(db.from('tasks').insert(tasks));
+await must(insert('tasks', tasks));
 await must(
-  db.from('tasks').insert([
+  insert('tasks', [
     { user_id, title: 'Ship gate screen', due_on: day(0), priority: 'high', category: 'Work', estimate_minutes: 90 },
     { user_id, title: 'Review budget', due_on: day(0), category: 'Money' },
     { user_id, title: 'Morning walk', due_on: day(0), recurrence: 'daily', category: 'Health', priority: 'low' },
@@ -215,9 +214,7 @@ await must(
 );
 
 const foods = await must(
-  db
-    .from('foods')
-    .insert([
+  insert('foods', [
       { user_id, name: 'Poha', serving: '1 plate', calories: 320, protein: 8, carbs: 55, fat: 7 },
       { user_id, name: 'Curd bowl', serving: '1 bowl', calories: 180, protein: 11, carbs: 14, fat: 8 },
       { user_id, name: 'Dal + rice', serving: '1 plate', calories: 610, protein: 21, carbs: 98, fat: 13 },
@@ -251,12 +248,12 @@ for (let offset = -30; offset <= 0; offset++) {
   }
   if (offset % 3 === 0) weights.push({ user_id, logged_on: day(offset), weight_kg: 74 - (offset + 30) * 0.05 + Math.random() * 0.5 });
 }
-await must(db.from('meal_logs').insert(meals));
-await must(db.from('water_logs').insert(water));
-await must(db.from('weight_logs').insert(weights));
+await must(insert('meal_logs', meals));
+await must(insert('water_logs', water));
+await must(insert('weight_logs', weights));
 
 await must(
-  db.from('meal_plans').insert(
+  insert('meal_plans', 
     [1, 2, 3, 4, 5].flatMap((weekday) => [
       { user_id, weekday, meal_type: 'breakfast', items: pick(['Poha', 'Curd bowl', 'Oats']) },
       { user_id, weekday, meal_type: 'lunch', items: pick(['Dal + rice', 'Paneer roti']) },
@@ -279,6 +276,6 @@ for (let offset = -32; offset <= -1; offset++) {
   const [title, body] = pick(NOTES);
   entries.push({ user_id, entry_on: day(offset), title, body, mood: pick(moods), tags: offset % 5 === 0 ? ['work'] : [] });
 }
-await must(db.from('diary_entries').insert(entries));
+await must(insert('diary_entries', entries));
 
 console.log(`Seeded ${EMAIL} / ${PASSWORD}. Answers: serein street, biscuit, mrs rao.`);
