@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
 import { verifyAnswer, hashAnswer } from '../lib/answers.js';
-import { HttpError, must } from '../lib/errors.js';
+import { HttpError, maybe, must } from '../lib/errors.js';
 import { issuePass, passLifetimeMs } from '../lib/gatePass.js';
 import { db } from '../lib/supabase.js';
 import { MISSES_BEFORE_COOLDOWN, roastFor } from './roasts.js';
@@ -27,7 +27,7 @@ async function loadQuestions(userId: string): Promise<StoredQuestion[]> {
 }
 
 async function loadState(userId: string) {
-  return must(
+  return maybe(
     await db
       .from('gate_state')
       .select('current_question_id, failed_count, locked_until')

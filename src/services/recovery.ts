@@ -1,6 +1,6 @@
 import { env } from '../config/env.js';
 import { sendMail } from '../lib/email.js';
-import { HttpError, must } from '../lib/errors.js';
+import { HttpError, maybe, must } from '../lib/errors.js';
 import { db } from '../lib/supabase.js';
 
 export const WAIT_MINUTES = { normal: 90, super: 20 } as const;
@@ -46,7 +46,7 @@ export function publicView(row: RecoveryRow | null) {
 
 async function latestFor(userId: string): Promise<RecoveryRow | null> {
   must(await db.rpc('recovery_tick'));
-  return must(
+  return maybe(
     await db
       .from('recovery_requests')
       .select('id, kind, status, requested_at, ready_at')
@@ -122,7 +122,7 @@ async function emailFor(userId: string): Promise<string | undefined> {
 // Approval and the waiting time are both required; whichever comes last unlocks it.
 export async function approve(requestId: string) {
   must(await db.rpc('recovery_tick'));
-  const row = must(
+  const row = maybe(
     await db.from('recovery_requests').select('id, user_id, status, ready_at').eq('id', requestId).maybeSingle(),
   );
   if (!row) throw new HttpError(404, 'Request not found.');
@@ -154,7 +154,7 @@ export async function approve(requestId: string) {
 
 export async function deny(requestId: string) {
   must(await db.rpc('recovery_tick'));
-  const row = must(
+  const row = maybe(
     await db.from('recovery_requests').select('id, status').eq('id', requestId).maybeSingle(),
   );
   if (!row) throw new HttpError(404, 'Request not found.');

@@ -9,10 +9,20 @@ export class HttpError extends Error {
   }
 }
 
-// Unwraps a Supabase response, turning a database failure into a thrown error.
-export function must<T>(result: { data: T | null; error: { message: string } | null }): T {
+type Result<T> = { data: T; error: { message: string } | null };
+
+// Unwraps a Supabase response that is expected to hold data.
+export function must<T>(result: Result<T>): NonNullable<T> {
   if (result.error) {
     throw new Error(result.error.message);
   }
-  return result.data as T;
+  return result.data as NonNullable<T>;
+}
+
+// Unwraps a Supabase response where finding nothing is a normal outcome.
+export function maybe<T>(result: Result<T>): T {
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+  return result.data;
 }
