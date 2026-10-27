@@ -26,10 +26,10 @@ const pick = <T,>(items: T[]): T => items[rand(0, items.length - 1)] as T;
 // Rows in one batch can differ; columns they leave out should get their defaults, not null.
 const insert = (table: string, rows: Record<string, unknown>[]) => db.from(table).insert(rows, { defaultToNull: false });
 
-async function must<T>(query: PromiseLike<{ data: T; error: { message: string } | null }>): Promise<T> {
+async function must<T>(query: PromiseLike<{ data: T; error: { message: string } | null }>): Promise<NonNullable<T>> {
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return data;
+  return data as NonNullable<T>;
 }
 
 const { data: list } = await db.auth.admin.listUsers({ perPage: 1000 });
