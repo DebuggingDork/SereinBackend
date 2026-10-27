@@ -28,6 +28,12 @@ export function limiter(windowMinutes: number, max: number) {
   });
 }
 
+// Runs before authentication, so a flood of bad tokens never reaches the auth server. It
+// counts by address alone and is generous, since people can share one.
+export function addressLimiter() {
+  return limiter(5, 600);
+}
+
 export const notFound: RequestHandler = () => {
   throw new HttpError(404, 'Not found.');
 };
@@ -35,6 +41,12 @@ export const notFound: RequestHandler = () => {
 export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
   if (error instanceof HttpError) {
     res.status(error.status).json({ error: error.message, ...error.details });
+    return;
+  }
+  // Body parser and routing errors carry their own 4xx, and their messages quote the input.
+  const status = (error as { status?: unknown }).status;
+  if (typeof status === 'number' && status >= 400 && status < 500) {
+    res.status(status).json({ error: status === 413 ? 'That is too much at once.' : 'That request does not look right.' });
     return;
   }
   console.error(`[error] ${req.method} ${req.path}`, error);
