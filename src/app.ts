@@ -7,6 +7,7 @@ import { errorHandler, notFound } from './middleware/common.js';
 import { adminRouter } from './routes/admin.js';
 import { gateRouter } from './routes/gate.js';
 import { healthRouter } from './routes/health.js';
+import { jobsRouter } from './routes/jobs.js';
 import { recoveryRouter } from './routes/recovery.js';
 
 export function createApp() {
@@ -14,16 +15,23 @@ export function createApp() {
 
   app.set('trust proxy', env.TRUST_PROXY_HOPS);
   app.disable('x-powered-by');
+  // Answers depend on who is asking, so nothing here may be stored along the way.
+  app.disable('etag');
 
   app.use(helmet());
   app.use(cors({ origin: allowedOrigins, credentials: true }));
   app.use(express.json({ limit: '32kb' }));
   app.use(cookieParser());
+  app.use((_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
 
   app.use(healthRouter);
   app.use('/gate', gateRouter);
   app.use('/recovery', recoveryRouter);
   app.use('/admin', adminRouter);
+  app.use('/jobs', jobsRouter);
 
   app.use(notFound);
   app.use(errorHandler);
