@@ -26,6 +26,20 @@ async function loadQuestions(userId: string): Promise<StoredQuestion[]> {
   );
 }
 
+interface Claim {
+  claimed: boolean;
+  current_question_id: string | null;
+  failed_count: number;
+  locked_until: string | null;
+}
+
+// Each guess takes the user's single slot before the slow comparison, so parallel requests
+// cannot all test an answer against the same question before a miss is recorded.
+async function claimAttempt(userId: string): Promise<Claim | null> {
+  const rows = must(await db.rpc('gate_claim_attempt', { p_user_id: userId })) as Claim[];
+  return rows[0] ?? null;
+}
+
 async function loadState(userId: string) {
   return maybe(
     await db
@@ -34,6 +48,10 @@ async function loadState(userId: string) {
       .eq('user_id', userId)
       .maybeSingle(),
   );
+}
+
+async function releaseAttempt(userId: string) {
+  must(await db.from('gate_state').update({ verifying_until: null }).eq('user_id', userId));
 }
 
 // Picks at random, skipping the question asked last whenever there is a choice.
@@ -129,19 +147,24 @@ export async function verify(
   const questions = await loadQuestions(userId);
   if (questions.length === 0) throw new HttpError(409, 'Set up your questions first.', { code: 'setup_required' });
 
-  const state = await loadState(userId);
-  const lockedUntil = activeLock(state?.locked_until);
+  const claim = await claimAttempt(userId);
+  const lockedUntil = activeLock(claim?.locked_until);
   if (lockedUntil) {
     throw new HttpError(429, 'Take a break. Think harder.', {
       code: 'locked',
       lockedUntil,
-      attempt: state?.failed_count ?? 0,
+      attempt: claim?.failed_count ?? 0,
       maxAttempts: MISSES_BEFORE_COOLDOWN,
     });
   }
-
-  const current = questions.find((q) => q.id === state?.current_question_id);
-  if (!current) throw new HttpError(409, 'That question has moved on. Try again.', { code: 'no_challenge' });
+  const current = questions.find((q) => q.id === claim?.current_question_id);
+  if (claim && !claim.claimed) {
+    throw new HttpError(429, 'One moment, still checking your last answer.', { code: 'busy' });
+  }
+  if (!current) {
+    await releaseAttempt(userId);
+    throw new HttpError(409, 'That question has moved on. Try again.', { code: 'no_challenge' });
+  }
 
   const correct = await verifyAnswer(current.answer_hash, answer);
 
@@ -159,20 +182,27 @@ export async function verify(
     must(
       await db
         .from('gate_state')
-        .update({ current_question_id: null, failed_count: 0, locked_until: null, last_failed_at: null })
+        .update({
+          current_question_id: null,
+          failed_count: 0,
+          locked_until: null,
+          last_failed_at: null,
+          verifying_until: null,
+        })
         .eq('user_id', userId),
     );
     return { ok: true, pass: await openGateSession(userId, sessionId) };
   }
 
+  // Every miss rotates the question, so one answer cannot be brute-forced. The new question
+  // goes on the table first, because recording the miss is what frees the slot.
+  const next = chooseQuestion(questions, current.id);
+  await putQuestionOnTable(userId, next);
+
   const failure = must(await db.rpc('gate_register_failure', { p_user_id: userId }).single()) as {
     failed_count: number;
     locked_until: string | null;
   };
-
-  // Every miss rotates the question, so one answer cannot be brute-forced.
-  const next = chooseQuestion(questions, current.id);
-  await putQuestionOnTable(userId, next);
 
   return {
     ok: false,
@@ -193,14 +223,17 @@ export async function hasQuestions(userId: string): Promise<boolean> {
   return (count ?? 0) > 0;
 }
 
-export async function replaceQuestions(userId: string, questions: QuestionInput[]): Promise<void> {
-  const hashed = await Promise.all(
+export function hashQuestions(questions: QuestionInput[]) {
+  return Promise.all(
     questions.map(async ({ question, answer }) => ({
       question: question.trim(),
       answer_hash: await hashAnswer(answer),
     })),
   );
-  must(await db.rpc('replace_security_questions', { p_user_id: userId, p_questions: hashed }));
+}
+
+export async function replaceQuestions(userId: string, questions: QuestionInput[]): Promise<void> {
+  must(await db.rpc('replace_security_questions', { p_user_id: userId, p_questions: await hashQuestions(questions) }));
 }
 
 export async function listQuestionTexts(userId: string) {
