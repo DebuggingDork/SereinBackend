@@ -284,6 +284,22 @@ describe.skipIf(!anonKey)('finance rules', () => {
     expect(badFour.error).not.toBeNull();
   });
 
+  it('refuses to delete an account in use, but deleting the user removes everything', async () => {
+    const person = await createPerson();
+    await setUp(person);
+    const { client } = person;
+    const account = (await client.from('accounts').insert({ name: 'HDFC', kind: 'bank', balance: 100 }).select().single()).data;
+    await client.from('transactions').insert({ kind: 'expense', amount: 10, account_id: account.id });
+
+    const refused = await client.from('accounts').delete().eq('id', account.id);
+    expect(refused.error?.code).toBe('23503');
+
+    const { error } = await db.auth.admin.deleteUser(person.id);
+    expect(error).toBeNull();
+    const left = await db.from('accounts').select('id').eq('user_id', person.id);
+    expect(left.data).toEqual([]);
+  });
+
   it('computes every chart helper for an empty account', async () => {
     const person = await createPerson();
     await setUp(person);
