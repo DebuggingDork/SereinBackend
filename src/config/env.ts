@@ -7,6 +7,8 @@ const schema = z.object({
 
   SUPABASE_URL: z.url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
+  // Only needed when a custom auth domain makes tokens name a different issuer.
+  SUPABASE_JWT_ISSUER: z.url().optional(),
 
   // Base64-encoded PKCS8 PEM. The matching public key lives on the frontend, so
   // pages can verify a pass without being able to mint one.
@@ -23,6 +25,9 @@ const schema = z.object({
   SMTP_PASS: z.string().optional(),
   MAIL_FROM: z.string().default('Serein <no-reply@serein.app>'),
   OWNER_NOTIFY_EMAIL: z.email().optional().or(z.literal('').transform(() => undefined)),
+
+  // Shared with the scheduler that calls POST /jobs/reminders. Unset, the route is off.
+  JOBS_SECRET: z.string().min(32).optional().or(z.literal('').transform(() => undefined)),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -34,4 +39,21 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 export const isProduction = env.NODE_ENV === 'production';
-export const allowedOrigins = env.FRONTEND_ORIGIN.split(',').map((origin) => origin.trim());
+
+// An origin with a path or a trailing slash never matches a browser's Origin header, and
+// "*" cannot be combined with credentials. Both would fail silently, so fail at startup.
+export function parseOrigins(value: string): string[] {
+  return value
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .map((origin) => {
+      if (!URL.canParse(origin) || !/^https?:$/.test(new URL(origin).protocol)) {
+        throw new Error(`Invalid environment:\n  FRONTEND_ORIGIN: "${origin}" is not an http(s) origin`);
+      }
+      return new URL(origin).origin;
+    });
+}
+
+export const allowedOrigins = parseOrigins(env.FRONTEND_ORIGIN);
+export const supabaseIssuer = env.SUPABASE_JWT_ISSUER ?? `${env.SUPABASE_URL.replace(/\/$/, '')}/auth/v1`;

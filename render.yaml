@@ -33,3 +33,5 @@ services:
         sync: false
       - key: OWNER_NOTIFY_EMAIL
         sync: false
+      - key: JOBS_SECRET
+        sync: false
