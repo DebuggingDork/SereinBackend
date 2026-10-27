@@ -7,6 +7,10 @@ const transport = env.SMTP_HOST
       port: env.SMTP_PORT,
       secure: env.SMTP_PORT === 465,
       auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
+      // The defaults wait minutes on a blocked port, which some free hosts have.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
     })
   : null;
 
