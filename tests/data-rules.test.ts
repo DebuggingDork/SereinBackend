@@ -215,6 +215,8 @@ describe.skipIf(!anonKey)('preferences and the local clock', () => {
       { weekStart: 'monday' },
       { monthStart: 40 },
       { salaryDay: '1; drop' },
+      { salaryRule: 'whenever' },
+      { salaryAccountId: 'not-an-id' },
     ]) {
       expect((await update(bad)).error?.code, JSON.stringify(bad)).toBe('23514');
     }
@@ -275,6 +277,42 @@ describe.skipIf(!anonKey)('chart corrections', () => {
 
     const { data: trend } = await client.rpc('balance_trend', { p_days: 1 });
     expect(Number(trend[0].balance)).toBe(1300);
+  });
+
+  it('counts down to the last working day of the month', async () => {
+    const { client, id } = await gated();
+    const update = await client
+      .from('profiles')
+      .update({ preferences: { timezone: 'Asia/Kolkata', salaryRule: 'last_working_day', salaryAccountId: id } })
+      .eq('id', id);
+    expect(update.error).toBeNull();
+
+    const lastWorkingDay = (year: number, month: number) => {
+      const day = new Date(Date.UTC(year, month + 1, 0));
+      while ([0, 6].includes(day.getUTCDay())) day.setUTCDate(day.getUTCDate() - 1);
+      return day;
+    };
+    const now = new Date(Date.now() + 5.5 * 3_600_000);
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    let salary = lastWorkingDay(now.getUTCFullYear(), now.getUTCMonth());
+    if (salary.getTime() <= today) salary = lastWorkingDay(now.getUTCFullYear(), now.getUTCMonth() + 1);
+
+    const { data, error } = await client.rpc('safe_to_spend');
+    expect(error).toBeNull();
+    expect(data[0].days_left).toBe((salary.getTime() - today) / 86_400_000);
+  });
+
+  it('lands a day 31 salary on the last day of a short month', async () => {
+    const { client, id } = await gated();
+    await client.from('profiles').update({ preferences: { timezone: 'Asia/Kolkata', salaryDay: 31 } }).eq('id', id);
+    const now = new Date(Date.now() + 5.5 * 3_600_000);
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const landing = (month: number) =>
+      Math.min(Date.UTC(now.getUTCFullYear(), month, 31), Date.UTC(now.getUTCFullYear(), month + 1, 0));
+    const salary = landing(now.getUTCMonth()) > today ? landing(now.getUTCMonth()) : landing(now.getUTCMonth() + 1);
+
+    const { data } = await client.rpc('safe_to_spend');
+    expect(data[0].days_left).toBe((salary - today) / 86_400_000);
   });
 
   it('prorates what a goal sets aside to the days left until salary', async () => {
