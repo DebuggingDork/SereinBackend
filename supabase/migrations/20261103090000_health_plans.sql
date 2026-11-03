@@ -30,7 +30,7 @@ create table public.health_plan_items (
              )),
   grp        text check (char_length(grp) <= 60),
   position   int not null default 0,
-  label      text not null check (char_length(label) between 1 and 120),
+  label      text not null check (char_length(label) between 1 and 600),
   detail     text check (char_length(detail) <= 600),
   value      text check (char_length(value) <= 40),
   created_at timestamptz not null default now(),
